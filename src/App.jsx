@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import jsPDF from "jspdf";
 import {
   StickyNote, CheckSquare, Calendar, Bell, Plus, Trash2,
-  Check, ChevronLeft, ChevronRight, Clock, X, LogOut, User
+  Check, ChevronLeft, ChevronRight, Clock, X, LogOut,
+  User, Search, FileDown, Tag
 } from "lucide-react";
 
-// ─── THEME ───────────────────────────────────────────────────────────────────
 const T = {
   bg: '#0C0C15',
   surface: '#13131D',
@@ -24,7 +25,12 @@ const T = {
 const today = new Date();
 const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-// ─── SHARED COMPONENTS ───────────────────────────────────────────────────────
+const TAGS = ['Kerja', 'Kuliah', 'Pribadi', 'Ide', 'Penting', 'Lainnya'];
+const TAG_COLORS = {
+  'Kerja': '#818CF8', 'Kuliah': '#38BDF8', 'Pribadi': '#34D399',
+  'Ide': '#F59E0B', 'Penting': '#FB7185', 'Lainnya': '#9CA3AF'
+};
+
 const Input = ({ value, onChange, placeholder, multiline, rows = 4, type = 'text', style }) => {
   const s = {
     width: '100%', background: T.surface, border: `1px solid ${T.border}`,
@@ -83,7 +89,13 @@ const PageHeader = ({ title, subtitle, onAdd }) => (
   </div>
 );
 
-// ─── AUTH PAGE ────────────────────────────────────────────────────────────────
+const SearchBar = ({ value, onChange }) => (
+  <div style={{ position: 'relative', marginBottom: 16 }}>
+    <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: T.muted }} />
+    <input value={value} onChange={e => onChange(e.target.value)} placeholder="Cari..." style={{ width: '100%', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: '8px 12px 8px 34px', color: T.text, fontSize: 13, outline: 'none', fontFamily: "'Outfit',sans-serif", boxSizing: 'border-box' }} />
+  </div>
+);
+
 function AuthPage() {
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
@@ -139,7 +151,6 @@ function AuthPage() {
   );
 }
 
-// ─── NOTES ───────────────────────────────────────────────────────────────────
 const noteColors = ['#F59E0B', '#818CF8', '#34D399', '#FB7185', '#38BDF8', '#A78BFA'];
 
 function NotesView({ user }) {
@@ -147,7 +158,9 @@ function NotesView({ user }) {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ title: '', content: '', color: '#818CF8' });
+  const [search, setSearch] = useState('');
+  const [filterTag, setFilterTag] = useState('');
+  const [form, setForm] = useState({ title: '', content: '', color: '#818CF8', tag: '' });
 
   useEffect(() => { fetchNotes(); }, []);
 
@@ -157,8 +170,8 @@ function NotesView({ user }) {
     setNotes(data || []); setLoading(false);
   };
 
-  const openNew = () => { setEditing(null); setForm({ title: '', content: '', color: '#818CF8' }); setModal(true); };
-  const openEdit = (n) => { setEditing(n.id); setForm({ title: n.title, content: n.content, color: n.color }); setModal(true); };
+  const openNew = () => { setEditing(null); setForm({ title: '', content: '', color: '#818CF8', tag: '' }); setModal(true); };
+  const openEdit = (n) => { setEditing(n.id); setForm({ title: n.title, content: n.content, color: n.color, tag: n.tag || '' }); setModal(true); };
 
   const save = async () => {
     if (!form.title.trim()) return;
@@ -169,30 +182,67 @@ function NotesView({ user }) {
 
   const del = async (id) => { await supabase.from('notes').delete().eq('id', id); fetchNotes(); };
 
+  const exportPDF = (n) => {
+    const doc = new jsPDF();
+    doc.setFontSize(18); doc.text(n.title, 20, 20);
+    doc.setFontSize(11);
+    const lines = doc.splitTextToSize(n.content || '', 170);
+    doc.text(lines, 20, 35);
+    doc.save(`${n.title}.pdf`);
+  };
+
+  const filtered = notes
+    .filter(n => !search || n.title.toLowerCase().includes(search.toLowerCase()) || n.content?.toLowerCase().includes(search.toLowerCase()))
+    .filter(n => !filterTag || n.tag === filterTag);
+
   return (
     <div>
       <PageHeader title="Catatan" subtitle={`${notes.length} catatan tersimpan`} onAdd={openNew} />
+      <SearchBar value={search} onChange={setSearch} />
+
+      {/* Filter Tag */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+        <button onClick={() => setFilterTag('')} style={{ background: !filterTag ? T.accentGlow : 'transparent', color: !filterTag ? T.accent : T.muted, border: `1px solid ${!filterTag ? T.accent : T.border}`, borderRadius: 20, padding: '3px 12px', fontSize: 11, cursor: 'pointer', fontFamily: "'Outfit',sans-serif" }}>Semua</button>
+        {TAGS.map(t => (
+          <button key={t} onClick={() => setFilterTag(filterTag === t ? '' : t)} style={{ background: filterTag === t ? TAG_COLORS[t] + '22' : 'transparent', color: filterTag === t ? TAG_COLORS[t] : T.muted, border: `1px solid ${filterTag === t ? TAG_COLORS[t] : T.border}`, borderRadius: 20, padding: '3px 12px', fontSize: 11, cursor: 'pointer', fontFamily: "'Outfit',sans-serif" }}>{t}</button>
+        ))}
+      </div>
+
       {loading ? <p style={{ color: T.muted, fontSize: 13 }}>Memuat...</p> : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 14, paddingBottom: 100 }}>
-          {notes.map(n => (
+          {filtered.map(n => (
             <div key={n.id} onClick={() => openEdit(n)} style={{ background: T.card, borderRadius: 12, padding: 16, cursor: 'pointer', border: `1px solid ${T.border}`, borderTop: `3px solid ${n.color}`, transition: 'transform 0.15s,box-shadow 0.15s' }}
               onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.3)'; }}
               onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                 <h3 style={{ color: T.text, margin: 0, fontSize: 14, fontWeight: 600, flex: 1, lineHeight: 1.3 }}>{n.title}</h3>
-                <button onClick={e => { e.stopPropagation(); del(n.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, padding: '0 0 0 8px', flexShrink: 0 }}><Trash2 size={13} /></button>
+                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                  <button onClick={e => { e.stopPropagation(); exportPDF(n); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, padding: '0 0 0 4px' }} title="Export PDF"><FileDown size={13} /></button>
+                  <button onClick={e => { e.stopPropagation(); del(n.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.muted, padding: '0 0 0 4px' }}><Trash2 size={13} /></button>
+                </div>
               </div>
+              {n.tag && <span style={{ fontSize: 10, color: TAG_COLORS[n.tag], background: TAG_COLORS[n.tag] + '20', padding: '2px 8px', borderRadius: 10, display: 'inline-block', marginBottom: 6 }}>{n.tag}</span>}
               <p style={{ color: T.subtle, margin: 0, fontSize: 12, lineHeight: 1.6, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{n.content}</p>
               <p style={{ color: T.muted, fontSize: 10, marginTop: 10, marginBottom: 0 }}>{new Date(n.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
             </div>
           ))}
-          {notes.length === 0 && <EmptyState icon={<StickyNote size={40} />} text="Belum ada catatan" />}
+          {filtered.length === 0 && <EmptyState icon={<StickyNote size={40} />} text="Tidak ada catatan ditemukan" />}
         </div>
       )}
+
       <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Edit Catatan' : 'Catatan Baru'}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Input value={form.title} onChange={v => setForm({ ...form, title: v })} placeholder="Judul catatan..." />
           <Input value={form.content} onChange={v => setForm({ ...form, content: v })} placeholder="Isi catatan..." multiline rows={5} />
+          <div>
+            <p style={{ color: T.subtle, fontSize: 11, marginBottom: 8, marginTop: 0 }}>TAG</p>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button onClick={() => setForm({ ...form, tag: '' })} style={{ background: !form.tag ? T.accentGlow : 'transparent', color: !form.tag ? T.accent : T.muted, border: `1px solid ${!form.tag ? T.accent : T.border}`, borderRadius: 20, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontFamily: "'Outfit',sans-serif" }}>Tanpa Tag</button>
+              {TAGS.map(t => (
+                <button key={t} onClick={() => setForm({ ...form, tag: t })} style={{ background: form.tag === t ? TAG_COLORS[t] + '22' : 'transparent', color: form.tag === t ? TAG_COLORS[t] : T.muted, border: `1px solid ${form.tag === t ? TAG_COLORS[t] : T.border}`, borderRadius: 20, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontFamily: "'Outfit',sans-serif" }}>{t}</button>
+              ))}
+            </div>
+          </div>
           <div>
             <p style={{ color: T.subtle, fontSize: 11, marginBottom: 8, marginTop: 0 }}>WARNA LABEL</p>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -210,11 +260,11 @@ function NotesView({ user }) {
   );
 }
 
-// ─── TODO ─────────────────────────────────────────────────────────────────────
 function TodoView({ user }) {
   const [todos, setTodos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState({ text: '', priority: 'medium', due_date: '' });
 
@@ -237,16 +287,42 @@ function TodoView({ user }) {
 
   const toggle = async (t) => { await supabase.from('todos').update({ done: !t.done }).eq('id', t.id); fetchTodos(); };
   const del = async (id) => { await supabase.from('todos').delete().eq('id', id); fetchTodos(); };
-  const filtered = todos.filter(t => filter === 'active' ? !t.done : filter === 'done' ? t.done : true);
+
+  const exportPDF = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(18); doc.text('Daftar Tugas', 20, 20);
+    doc.setFontSize(11);
+    let y = 35;
+    todos.forEach((t, i) => {
+      const status = t.done ? '[✓]' : '[ ]';
+      const lines = doc.splitTextToSize(`${status} ${t.text}`, 170);
+      doc.text(lines, 20, y);
+      y += lines.length * 7 + 3;
+      if (y > 270) { doc.addPage(); y = 20; }
+    });
+    doc.save('daftar-tugas.pdf');
+  };
+
+  const filtered = todos
+    .filter(t => filter === 'active' ? !t.done : filter === 'done' ? t.done : true)
+    .filter(t => !search || t.text.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div>
       <PageHeader title="To-Do" subtitle={`${todos.filter(t => !t.done).length} tugas belum selesai`} onAdd={() => setModal(true)} />
-      <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
-        {[['all', 'Semua'], ['active', 'Aktif'], ['done', 'Selesai']].map(([f, label]) => (
-          <button key={f} onClick={() => setFilter(f)} style={{ background: filter === f ? T.accentGlow : 'transparent', color: filter === f ? T.accent : T.muted, border: `1px solid ${filter === f ? T.accent : T.border}`, borderRadius: 20, padding: '4px 14px', fontSize: 12, cursor: 'pointer', fontFamily: "'Outfit',sans-serif" }}>{label}</button>
-        ))}
+      <SearchBar value={search} onChange={setSearch} />
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[['all', 'Semua'], ['active', 'Aktif'], ['done', 'Selesai']].map(([f, label]) => (
+            <button key={f} onClick={() => setFilter(f)} style={{ background: filter === f ? T.accentGlow : 'transparent', color: filter === f ? T.accent : T.muted, border: `1px solid ${filter === f ? T.accent : T.border}`, borderRadius: 20, padding: '4px 14px', fontSize: 12, cursor: 'pointer', fontFamily: "'Outfit',sans-serif" }}>{label}</button>
+          ))}
+        </div>
+        <button onClick={exportPDF} style={{ background: 'transparent', color: T.indigo, border: `1px solid ${T.indigo}`, borderRadius: 8, padding: '4px 12px', fontSize: 12, cursor: 'pointer', fontFamily: "'Outfit',sans-serif", display: 'flex', alignItems: 'center', gap: 4 }}>
+          <FileDown size={13} /> Export PDF
+        </button>
       </div>
+
       {loading ? <p style={{ color: T.muted, fontSize: 13 }}>Memuat...</p> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 100 }}>
           {filtered.map(t => (
@@ -264,9 +340,10 @@ function TodoView({ user }) {
               </div>
             </div>
           ))}
-          {filtered.length === 0 && <EmptyState icon={<CheckSquare size={40} />} text="Tidak ada tugas" />}
+          {filtered.length === 0 && <EmptyState icon={<CheckSquare size={40} />} text="Tidak ada tugas ditemukan" />}
         </div>
       )}
+
       <Modal open={modal} onClose={() => setModal(false)} title="Tugas Baru">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Input value={form.text} onChange={v => setForm({ ...form, text: v })} placeholder="Deskripsi tugas..." />
@@ -291,7 +368,6 @@ function TodoView({ user }) {
   );
 }
 
-// ─── CALENDAR ─────────────────────────────────────────────────────────────────
 const evColors = ['#F59E0B', '#818CF8', '#34D399', '#FB7185', '#38BDF8'];
 
 function CalendarView({ user }) {
@@ -384,10 +460,10 @@ function CalendarView({ user }) {
   );
 }
 
-// ─── REMINDERS ────────────────────────────────────────────────────────────────
 function RemindersView({ user }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState({ title: '', date: todayStr, time: '08:00' });
 
@@ -407,7 +483,9 @@ function RemindersView({ user }) {
 
   const toggle = async (r) => { await supabase.from('reminders').update({ done: !r.done }).eq('id', r.id); fetchReminders(); };
   const del = async (id) => { await supabase.from('reminders').delete().eq('id', id); fetchReminders(); };
-  const active = items.filter(r => !r.done), done = items.filter(r => r.done);
+
+  const filtered = items.filter(r => !search || r.title.toLowerCase().includes(search.toLowerCase()));
+  const active = filtered.filter(r => !r.done), done = filtered.filter(r => r.done);
 
   const Card = ({ r }) => (
     <div style={{ background: T.card, borderRadius: 12, padding: '12px 16px', border: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', gap: 12, opacity: r.done ? 0.4 : 1, transition: 'opacity 0.2s', marginBottom: 8 }}>
@@ -424,12 +502,13 @@ function RemindersView({ user }) {
 
   return (
     <div>
-      <PageHeader title="Pengingat" subtitle={`${active.length} pengingat aktif`} onAdd={() => setModal(true)} />
+      <PageHeader title="Pengingat" subtitle={`${items.filter(r => !r.done).length} pengingat aktif`} onAdd={() => setModal(true)} />
+      <SearchBar value={search} onChange={setSearch} />
       {loading ? <p style={{ color: T.muted, fontSize: 13 }}>Memuat...</p> : (
         <div style={{ paddingBottom: 100 }}>
           {active.map(r => <Card key={r.id} r={r} />)}
           {done.length > 0 && (<><p style={{ color: T.muted, fontSize: 11, marginTop: 20, marginBottom: 8, letterSpacing: '0.5px' }}>SELESAI</p>{done.map(r => <Card key={r.id} r={r} />)}</>)}
-          {items.length === 0 && <EmptyState icon={<Bell size={40} />} text="Belum ada pengingat" />}
+          {filtered.length === 0 && <EmptyState icon={<Bell size={40} />} text="Tidak ada pengingat ditemukan" />}
         </div>
       )}
       <Modal open={modal} onClose={() => setModal(false)} title="Pengingat Baru">
@@ -448,7 +527,6 @@ function RemindersView({ user }) {
   );
 }
 
-// ─── ROOT APP ──────────────────────────────────────────────────────────────────
 export default function FokusApp() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
